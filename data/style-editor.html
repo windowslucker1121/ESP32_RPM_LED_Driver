@@ -29,7 +29,7 @@
                 <select id="styleSelect">
                     <option value="new">-- Create New Style --</option>
                 </select>
-                <button id="deleteStyleBtn" disabled>Delete</button>
+                <button id="deleteStyleBtn" title="Currently disabled due to a bug when deleting styles"disabled>Delete</button>
             </div>
 
             <form id="styleForm">
@@ -335,7 +335,7 @@
                     deleteStyleBtn.disabled = true;
                 } else {
                     requestStyle(selectedStyle);
-                    deleteStyleBtn.disabled = false;
+                    //deleteStyleBtn.disabled = false;
                 }
             });
 
