@@ -29,8 +29,6 @@ int PWMReader::readRawValue()
         return -1;
     }
 
-    frequency = constrain(frequency, readerMin, readerMax);
-
     static float filteredFreq = frequency;
     filteredFreq = 0.7 * filteredFreq + 0.3 * frequency;
 
