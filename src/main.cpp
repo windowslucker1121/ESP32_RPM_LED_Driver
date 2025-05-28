@@ -14,7 +14,7 @@
 #include "LedDisplayStyleRegistry.h"
 #include <FastLED.h>
 #include <nvs_flash.h>
-
+#include "WifiCredentials.h"
 bool connectToWifi();
 Settings* settings = nullptr;
 ISensor* sensor = new DevSensor();
@@ -51,11 +51,7 @@ void setup() {
     ESP_ERROR_CHECK(ret);
 
     Serial.begin(115200);
-    Serial.println("Starting...");
-
-    const char* ssid = "yourSSID";
-    const char* password = "yourPASSWSORD";
-    
+    Serial.println("Starting...");    
 
 #if defined(USE_AP_MODE)
         const char* apSSID = "PWM_Reader_AP";
@@ -66,7 +62,7 @@ void setup() {
         Serial.println(WiFi.softAPIP());
 #elif defined(USE_STA_MODE)
         WiFi.mode(WIFI_STA);
-        WiFi.begin(ssid, password);
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
         int wifiFailedCounter = 0;
         Serial.print("Connecting to WiFi");
@@ -74,7 +70,7 @@ void setup() {
             Serial.println("\nFailed to connect to WiFi 10 times");
             Serial.println("Retrying one more time...");
             WiFi.disconnect();
-            WiFi.begin(ssid, password);
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
             if (!connectToWifi()) {
                 Serial.println("\nFailed to connect to WiFi again, staying in AP mode...");
                 WiFi.softAP("PWM_Reader_AP", "12345678");
