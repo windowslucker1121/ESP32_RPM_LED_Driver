@@ -6,7 +6,8 @@ This Project aims to solve my issue where i moved from a ZX6R which has a higher
 This fact gets me in situations where i find myself in hitting the Rev Limiter, because i couldnt really notice the "small" Shift indicator provided by Z1000SX.
 
 Enough words here is the finished "Product":
-![](https://github.com/windowslucker1121/ESP32_RPM_LED_Driver/blob/main/pictures/finished.PNG?raw=true)
+
+![](https://github.com/windowslucker1121/ESP32_RPM_LED_Driver/blob/main/pictures/mounted.gif?raw=true)
 
 #### Details:
 
