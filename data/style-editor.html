@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>LED Style Editor</title>
+    <link rel="stylesheet" href="/main.css">
+</head>
+
+<body>
+    <div class="topbar">
+        <a href="/main.html">Main</a>
+        <a href="/style-editor.html">Style Editor</a>
+        <a href="/firmware-update.html">System</a>
+    </div>
+    <div class="container">
+        <h1>LED Style Editor</h1>
+
+        <div id="status" class="disconnected">Disconnected</div>
+        <div class="connection-status">
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+        </div>
+
+        <div class="style-editor">
+            <label for ="deleteStyleBtn">If you delete a standard Style you need to reflash the filesystem.</label>
+            <div class="style-list">
+                <label for="styleSelect">Select Style:</label>
+                <select id="styleSelect">
+                    <option value="new">-- Create New Style --</option>
+                </select>
+                <button id="deleteStyleBtn" disabled>Delete</button>
+            </div>
+
+            <form id="styleForm">
+                <label for="styleName">Style Name:</label>
+                <input type="text" id="styleName" required>
+
+                <label for="patternType">Pattern Type:</label>
+                <select id="patternType">
+                    <option value="0">Left to Right</option>
+                    <option value="1">Right to Left</option>
+                    <option value="2">Center to Edges</option>
+                    <option value="3">Edges to Center</option>
+                </select>
+
+                <div class="color-section">
+                    <h3>Color Settings</h3>
+                    <div class="style-properties">
+                        <div class="color-picker">
+                            <label>Low Value Color:</label>
+                            <div class="color-input">
+                                <div id="lowColorSwatch" class="color-swatch"></div>
+                                <input type="color" id="lowColor" value="#00FF00">
+                            </div>
+                        </div>
+
+                        <div class="color-picker">
+                            <label>Mid Value Color:</label>
+                            <div class="color-input">
+                                <div id="midColorSwatch" class="color-swatch"></div>
+                                <input type="color" id="midColor" value="#FFFF00">
+                            </div>
+                        </div>
+
+                        <div class="color-picker">
+                            <label>High Value Color:</label>
+                            <div class="color-input">
+                                <div id="highColorSwatch" class="color-swatch"></div>
+                                <input type="color" id="highColor" value="#FF0000">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="threshold-settings">
+                        <label for="lowPercent">Low Color Threshold (%):</label>
+                        <input type="number" id="lowPercent" min="1" max="80" value="40">
+
+                        <label for="highPercent">High Color Threshold (%):</label>
+                        <input type="number" id="highPercent" min="1" max="80" value="30">
+                    </div>
+                </div>
+
+                <div class="animation-section">
+                    <h3>Animation Settings</h3>
+                    <div class="animation-properties">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enableFlashing">
+                            <label for="enableFlashing">Enable Flashing</label>
+                        </div>
+
+                        <div id="flashingOptions" style="display: none;">
+                            <label for="flashInterval">Flash Interval (ms):</label>
+                            <input type="number" id="flashInterval" min="50" max="1000" value="100">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="preview-container">
+                    <h3>Preview</h3>
+                    <div class="led-preview" id="ledPreview">
+                        <!-- is updated dynamicly-->
+                    </div>
+
+                    <div class="slider-container">
+                        <label for="valueSlider">Value: <span id="valueDisplay">50</span>%</label>
+                        <input type="range" id="valueSlider" min="0" max="100" value="50">
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button type="submit" id="saveBtn">Save Style</button>
+                    <button type="button" id="cancelBtn">Cancel</button>
+                </div>
+            </form>
+        </div>
+
+        <div id="response"></div>
+    </div>
+
+    <script>
+        const WS_MSG_DATA_UPDATE = 0x01;
+        const WS_MSG_PING = 0x02;
+        const WS_MSG_PONG = 0x03;
+        const WS_MSG_CONFIG_REQUEST = 0x04;
+        const WS_MSG_CONFIG_RESPONSE = 0x05;
+        const WS_MSG_STYLE_REQUEST = 0x06;
+        const WS_MSG_STYLE_RESPONSE = 0x07;
+        const WS_MSG_TEST_MODE = 0x08;
+        const WS_MSG_CONFIG_UPDATE = 0x10;
+        const WS_MSG_CONFIG_CONFIRM = 0x11;
+
+        const WS_MSG_STYLE_LIST_REQUEST = 0x20;
+        const WS_MSG_STYLE_LIST_RESPONSE = 0x21;
+        const WS_MSG_STYLE_GET_REQUEST = 0x22;
+        const WS_MSG_STYLE_GET_RESPONSE = 0x23;
+        const WS_MSG_STYLE_SAVE = 0x24;
+        const WS_MSG_STYLE_SAVE_RESULT = 0x25;
+        const WS_MSG_STYLE_DELETE = 0x26;
+        const WS_MSG_STYLE_DELETE_RESULT = 0x27;
+
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const statusEl = document.getElementById('status');
+        const styleSelect = document.getElementById('styleSelect');
+        const styleForm = document.getElementById('styleForm');
+        const deleteStyleBtn = document.getElementById('deleteStyleBtn');
+        const responseDiv = document.getElementById('response');
+
+        const styleNameInput = document.getElementById('styleName');
+        const patternTypeSelect = document.getElementById('patternType');
+        const lowColorInput = document.getElementById('lowColor');
+        const midColorInput = document.getElementById('midColor');
+        const highColorInput = document.getElementById('highColor');
+        const lowPercentInput = document.getElementById('lowPercent');
+        const highPercentInput = document.getElementById('highPercent');
+        const enableFlashingCheckbox = document.getElementById('enableFlashing');
+        const flashIntervalInput = document.getElementById('flashInterval');
+        const flashingOptions = document.getElementById('flashingOptions');
+        const valueSlider = document.getElementById('valueSlider');
+        const valueDisplay = document.getElementById('valueDisplay');
+
+        const ledPreview = document.getElementById('ledPreview');
+        const ledCount = 15; 
+        const preview = {
+            leds: [],
+            value: 50,
+            styleName: '',
+            patternType: 0,
+            colors: {
+                low: '#00FF00',
+                mid: '#FFFF00',
+                high: '#FF0000',
+                lowPercent: 40,
+                highPercent: 30
+            },
+            enableFlashing: false,
+            flashInterval: 100,
+            flashState: true,
+            lastFlashToggle: 0
+        };
+
+        function initLedPreview() {
+            ledPreview.innerHTML = '';
+            preview.leds = [];
+
+            for (let i = 0; i < ledCount; i++) {
+                const led = document.createElement('div');
+                led.className = 'led';
+                ledPreview.appendChild(led);
+                preview.leds.push(led);
+            }
+        }
+
+        function setupColorSwatches() {
+            document.getElementById('lowColorSwatch').style.backgroundColor = lowColorInput.value;
+            document.getElementById('midColorSwatch').style.backgroundColor = midColorInput.value;
+            document.getElementById('highColorSwatch').style.backgroundColor = highColorInput.value;
+
+            lowColorInput.addEventListener('input', () => {
+                document.getElementById('lowColorSwatch').style.backgroundColor = lowColorInput.value;
+                preview.colors.low = lowColorInput.value;
+                updatePreview();
+            });
+
+            midColorInput.addEventListener('input', () => {
+                document.getElementById('midColorSwatch').style.backgroundColor = midColorInput.value;
+                preview.colors.mid = midColorInput.value;
+                updatePreview();
+            });
+
+            highColorInput.addEventListener('input', () => {
+                document.getElementById('highColorSwatch').style.backgroundColor = highColorInput.value;
+                preview.colors.high = highColorInput.value;
+                updatePreview();
+            });
+        }
+
+        function updatePreview() {
+            const value = preview.value;
+            const numLeds = ledCount;
+            let numLedsToLight = Math.floor((value * numLeds) / 100);
+
+            if (value % 10 >= 5 && numLedsToLight < numLeds) {
+                numLedsToLight++;
+            }
+
+            if (preview.enableFlashing && value >= 100 - preview.colors.highPercent) {
+                const currentTime = Date.now();
+                if (currentTime - preview.lastFlashToggle >= preview.flashInterval) {
+                    preview.flashState = !preview.flashState;
+                    preview.lastFlashToggle = currentTime;
+                }
+            } else {
+                preview.flashState = true;
+            }
+
+            for (let i = 0; i < numLeds; i++) {
+                const led = preview.leds[i];
+                led.className = 'led'; 
+
+                let shouldLight = false;
+
+                switch (parseInt(preview.patternType)) {
+                    case 0: // Left to Right
+                        shouldLight = i < numLedsToLight;
+                        break;
+
+                    case 1: // Right to Left
+                        shouldLight = i >= numLeds - numLedsToLight;
+                        break;
+
+                    case 2: // Center to Edges
+                        const middle = Math.floor(numLeds / 2);
+                        const halfLedsToLight = Math.floor(numLedsToLight / 2);
+                        shouldLight = (i >= middle - halfLedsToLight) && (i < middle + halfLedsToLight);
+                        if (numLedsToLight % 2 === 1 && i === middle + halfLedsToLight) {
+                            shouldLight = true;
+                        }
+                        break;
+
+                    case 3: // Edges to Center
+                        const halfLeds = Math.floor(numLedsToLight / 2);
+                        shouldLight = (i < halfLeds) || (i >= numLeds - halfLeds);
+                        if (numLedsToLight % 2 === 1 && i === halfLeds) {
+                            shouldLight = true;
+                        }
+                        break;
+                }
+
+                const finalLightState = shouldLight && (preview.flashState || value < 100 - preview.colors.highPercent);
+
+                if (finalLightState) {
+                    led.classList.add('on');
+
+                    let color;
+                    if (value <= preview.colors.lowPercent) {
+                        color = preview.colors.low;
+                    } else if (value >= 100 - preview.colors.highPercent) {
+                        color = preview.colors.high;
+                    } else {
+                        color = preview.colors.mid;
+                    }
+
+                    led.style.backgroundColor = color;
+                } else {
+                    led.style.backgroundColor = '#333';
+                }
+            }
+
+            if (preview.enableFlashing && value >= 100 - preview.colors.highPercent) {
+                setTimeout(updatePreview, 50);
+            }
+        }
+
+        function initUI() {
+            valueSlider.addEventListener('input', () => {
+                const value = valueSlider.value;
+                valueDisplay.textContent = value;
+                preview.value = parseInt(value);
+                updatePreview();
+            });
+
+            enableFlashingCheckbox.addEventListener('change', () => {
+                flashingOptions.style.display = enableFlashingCheckbox.checked ? 'block' : 'none';
+                preview.enableFlashing = enableFlashingCheckbox.checked;
+                updatePreview();
+            });
+
+            flashIntervalInput.addEventListener('input', () => {
+                preview.flashInterval = parseInt(flashIntervalInput.value);
+            });
+
+            patternTypeSelect.addEventListener('change', () => {
+                preview.patternType = patternTypeSelect.value;
+                updatePreview();
+            });
+
+            lowPercentInput.addEventListener('input', () => {
+                preview.colors.lowPercent = parseInt(lowPercentInput.value);
+                updatePreview();
+            });
+
+            highPercentInput.addEventListener('input', () => {
+                preview.colors.highPercent = parseInt(highPercentInput.value);
+                updatePreview();
+            });
+
+            styleSelect.addEventListener('change', () => {
+                const selectedStyle = styleSelect.value;
+                if (selectedStyle === 'new') {
+                    styleForm.reset();
+                    styleNameInput.value = 'NewStyle';
+                    resetPreviewToDefaults();
+                    deleteStyleBtn.disabled = true;
+                } else {
+                    requestStyle(selectedStyle);
+                    deleteStyleBtn.disabled = false;
+                }
+            });
+
+            styleForm.addEventListener('submit', (e) => {
+                console.log("calling saveStyle");
+                e.preventDefault();
+                saveStyle();
+            });
+
+            deleteStyleBtn.addEventListener('click', () => {
+                const selectedStyle = styleSelect.value;
+                if (selectedStyle !== 'new' && confirm(`Are you sure you want to delete the style "${selectedStyle}"?`)) {
+                    deleteStyle(selectedStyle);
+                }
+            });
+
+            document.getElementById('cancelBtn').addEventListener('click', () => {
+                const selectedStyle = styleSelect.value;
+                if (selectedStyle !== 'new') {
+                    requestStyle(selectedStyle);
+                } else {
+                    resetPreviewToDefaults();
+                }
+            });
+
+            initLedPreview();
+            setupColorSwatches();
+            updatePreview();
+        }
+
+        function resetPreviewToDefaults() {
+            preview.value = 50;
+            preview.patternType = 0;
+            preview.colors = {
+                low: '#00FF00',
+                mid: '#FFFF00',
+                high: '#FF0000',
+                lowPercent: 40,
+                highPercent: 30
+            };
+            preview.enableFlashing = false;
+            preview.flashInterval = 100;
+
+            valueSlider.value = preview.value;
+            valueDisplay.textContent = preview.value;
+            patternTypeSelect.value = preview.patternType;
+            lowColorInput.value = preview.colors.low;
+            midColorInput.value = preview.colors.mid;
+            highColorInput.value = preview.colors.high;
+            lowPercentInput.value = preview.colors.lowPercent;
+            highPercentInput.value = preview.colors.highPercent;
+            enableFlashingCheckbox.checked = preview.enableFlashing;
+            flashingOptions.style.display = preview.enableFlashing ? 'block' : 'none';
+            flashIntervalInput.value = preview.flashInterval;
+
+            document.getElementById('lowColorSwatch').style.backgroundColor = preview.colors.low;
+            document.getElementById('midColorSwatch').style.backgroundColor = preview.colors.mid;
+            document.getElementById('highColorSwatch').style.backgroundColor = preview.colors.high;
+
+            updatePreview();
+        }
+
+        let socket = null;
+        let pingInterval = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 3;
+
+        connectBtn.addEventListener('click', () => {
+            connectWebSocket();
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            disconnectWebSocket();
+        });
+
+        function connectWebSocket() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            let wsUrl = `${protocol}//${location.host}/ws`;
+            
+            if (location.host === '') {
+                console.log('Connecting to hardcoded IP WebSocket server');
+                wsUrl = 'ws://10.10.0.225/ws';
+            }
+
+            try {
+                socket = new WebSocket(wsUrl);
+
+                socket.onopen = () => {
+                    console.log('WebSocket connected');
+                    statusEl.textContent = 'Connected';
+                    statusEl.className = 'connected';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    reconnectAttempts = 0;
+
+                    pingInterval = setInterval(sendPing, 2500);
+
+                    refreshStyleList();
+                    if (styleSelect.value !== 'new') {
+                        requestStyle(styleSelect.value);
+                    }
+                };
+
+                socket.onmessage = async (event) => {
+                    if (event.data instanceof Blob) {
+                        const arrayBuffer = await event.data.arrayBuffer();
+                        const data = new Uint8Array(arrayBuffer);
+                        const messageType = data[0];
+
+                        switch (messageType) {
+                            case WS_MSG_STYLE_LIST_RESPONSE:
+                                handleStyleListResponse(data);
+                                break;
+
+                            case WS_MSG_STYLE_GET_RESPONSE:
+                                handleStyleGetResponse(data);
+                                break;
+
+                            case WS_MSG_STYLE_SAVE_RESULT:
+                                showResponse(data[1] ? 'Style saved successfully' : 'Error saving style', data[1]);
+                                if (data[1]) {
+                                    refreshStyleList();
+                                }
+                                break;
+
+                            case WS_MSG_STYLE_DELETE_RESULT:
+                                showResponse(data[1] ? 'Style deleted successfully' : 'Error deleting style', data[1]);
+                                if (data[1]) {
+                                    refreshStyleList();
+                                }
+                                break;
+                        }
+                    }
+                };
+
+                socket.onclose = () => {
+                    console.log('WebSocket disconnected');
+                    statusEl.textContent = 'Disconnected';
+                    statusEl.className = 'disconnected';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    clearInterval(pingInterval);
+
+                    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        setTimeout(connectWebSocket, 2000);
+                        reconnectAttempts++;
+                    }
+                };
+
+                socket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                };
+            } catch (error) {
+                console.error('WebSocket connection failed:', error);
+            }
+        }
+
+
+        function disconnectWebSocket() {
+            if (socket) {
+                socket.close();
+            }
+        }
+
+        function sendPing() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(new Uint8Array([WS_MSG_PING]));
+            }
+        }
+
+        function refreshStyleList() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(new Uint8Array([WS_MSG_STYLE_LIST_REQUEST]));
+            }
+        }
+
+        function handleStyleListResponse(data) {
+            const styleCount = data[1];
+            let offset = 2;
+
+            styleSelect.innerHTML = '<option value="new">-- Create New Style --</option>';
+
+            for (let i = 0; i < styleCount; i++) {
+                const nameLength = data[offset++];
+                const nameBytes = data.slice(offset, offset + nameLength);
+                const styleName = new TextDecoder().decode(nameBytes);
+
+                const option = document.createElement('option');
+                option.value = styleName;
+                option.textContent = styleName;
+                styleSelect.appendChild(option);
+
+                offset += nameLength;
+            }
+        }
+
+        function requestStyle(styleName) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const encoder = new TextEncoder();
+                const nameData = encoder.encode(styleName);
+                const message = new Uint8Array(1 + nameData.length);
+                message[0] = WS_MSG_STYLE_GET_REQUEST;
+                message.set(nameData, 1);
+                socket.send(message);
+            }
+        }
+
+        function handleStyleGetResponse(data) {
+            if (data.length === 1) {
+                showResponse('Style not found', false);
+                return;
+            }
+
+            const jsonString = new TextDecoder().decode(data.slice(1));
+            try {
+                const styleConfig = JSON.parse(jsonString);
+
+                styleNameInput.value = styleConfig.name;
+                patternTypeSelect.value = styleConfig.pattern;
+                lowColorInput.value = rgbToHex(styleConfig.colors.lowR, styleConfig.colors.lowG, styleConfig.colors.lowB);
+                midColorInput.value = rgbToHex(styleConfig.colors.midR, styleConfig.colors.midG, styleConfig.colors.midB);
+                highColorInput.value = rgbToHex(styleConfig.colors.highR, styleConfig.colors.highG, styleConfig.colors.highB);
+                lowPercentInput.value = styleConfig.colors.lowPercent;
+                highPercentInput.value = styleConfig.colors.highPercent;
+                enableFlashingCheckbox.checked = styleConfig.enableFlashing;
+                flashIntervalInput.value = styleConfig.flashInterval;
+
+                preview.styleName = styleConfig.name;
+                preview.patternType = styleConfig.pattern;
+                preview.colors.low = lowColorInput.value;
+                preview.colors.mid = midColorInput.value;
+                preview.colors.high = highColorInput.value;
+                preview.colors.lowPercent = styleConfig.colors.lowPercent;
+                preview.colors.highPercent = styleConfig.colors.highPercent;
+                preview.enableFlashing = styleConfig.enableFlashing;
+                preview.flashInterval = styleConfig.flashInterval;
+
+                flashingOptions.style.display = preview.enableFlashing ? 'block' : 'none';
+                updatePreview();
+                showResponse('Style loaded successfully', true);
+
+            } catch (error) {
+                console.error('Error parsing style config:', error);
+                showResponse('Error loading style configuration', false);
+            }
+        }
+
+        function rgbToHex(r, g, b) {
+            return '#' + [r, g, b].map(x => {
+                const hex = x.toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            }).join('');
+        }
+
+        function saveStyle() {
+            const styleData = {
+                name: styleNameInput.value,
+                pattern: parseInt(patternTypeSelect.value),
+                colors: {
+                    lowR: parseInt(lowColorInput.value.slice(1, 3), 16),
+                    lowG: parseInt(lowColorInput.value.slice(3, 5), 16),
+                    lowB: parseInt(lowColorInput.value.slice(5, 7), 16),
+                    midR: parseInt(midColorInput.value.slice(1, 3), 16),
+                    midG: parseInt(midColorInput.value.slice(3, 5), 16),
+                    midB: parseInt(midColorInput.value.slice(5, 7), 16),
+                    highR: parseInt(highColorInput.value.slice(1, 3), 16),
+                    highG: parseInt(highColorInput.value.slice(3, 5), 16),
+                    highB: parseInt(highColorInput.value.slice(5, 7), 16),
+                    lowPercent: parseInt(lowPercentInput.value),
+                    highPercent: parseInt(highPercentInput.value)
+                },
+                enableFlashing: enableFlashingCheckbox.checked,
+                flashInterval: parseInt(flashIntervalInput.value)
+            };
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const jsonString = JSON.stringify(styleData);
+                const encoder = new TextEncoder();
+                const message = encoder.encode(jsonString);
+                const fullMessage = new Uint8Array([WS_MSG_STYLE_SAVE, ...message]);
+                socket.send(fullMessage);
+            }
+        }
+
+        function deleteStyle(styleName) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const encoder = new TextEncoder();
+                const nameData = encoder.encode(styleName);
+                const message = new Uint8Array(1 + nameData.length);
+                message[0] = WS_MSG_STYLE_DELETE;
+                message.set(nameData, 1);
+                socket.send(message);
+            }
+        }
+
+        function showResponse(message, isSuccess) {
+            responseDiv.textContent = message;
+            responseDiv.style.color = isSuccess ? '#4CAF50' : '#f44336';
+            setTimeout(() => {
+                responseDiv.textContent = '';
+            }, 3000);
+        }
+
+        initUI();
+        connectWebSocket();
+    </script>
+</body>
+
+</html>

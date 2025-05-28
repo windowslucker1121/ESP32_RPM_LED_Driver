@@ -1,0 +1,189 @@
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>System</title>
+    <link rel="stylesheet" href="/main.css">
+</head>
+
+<body>
+    <div class="topbar">
+        <a href="/main.html">Main</a>
+        <a href="/style-editor.html">Style Editor</a>
+        <a href="/firmware-update.html">System</a>
+    </div>
+    <div class="container">
+        <h1>Console</h1>
+        <iframe src="/webserial" style="width: 100%; height: 500px; border: none;"></iframe>
+    </div>
+
+    <div class="container">
+        <h1>Firmware Update</h1>
+        <form id="uploadForm" class="form-row">
+            <input type="file" id="firmwareFile" accept=".bin" required />
+            <button type="submit">Upload Firmware</button>
+        </form>
+        <p id="status"></p>
+    </div>
+
+    <div class="container">
+        <h1>SPIFFS File Manager</h1>
+        <div id="fileList"></div>
+        <form id="uploadFileForm" class="form-row">
+            <input type="file" id="newFile" required />
+            <button type="submit">Upload File</button>
+        </form>
+        <p id="fileManagerStatus"></p>
+    </div>
+
+    <div class="container">
+        <h1>Edit File</h1>
+        <select id="fileSelector"></select>
+        <textarea id="fileEditor" rows="20" cols="80"></textarea>
+        <br />
+        <button id="saveFileButton">Save File</button>
+        <p id="editorStatus"></p>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            const fileInput = document.getElementById('firmwareFile');
+            const status = document.getElementById('status');
+
+            if (!fileInput.files.length) {
+                status.textContent = 'Please select a file.';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('firmware', fileInput.files[0]);
+
+            try {
+                status.textContent = 'Uploading...';
+                const response = await fetch('/update', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    status.textContent = 'Firmware uploaded successfully. Restarting...';
+                } else {
+                    status.textContent = 'Firmware upload failed.';
+                }
+            } catch (error) {
+                status.textContent = 'An error occurred during upload. - ' + error.message;
+            }
+        });
+
+        async function fetchFileList() {
+            const response = await fetch('/list-files');
+            const fileList = await response.json();
+            const fileListDiv = document.getElementById('fileList');
+            fileListDiv.innerHTML = '<ul>' + fileList.map(file => `
+                <li>
+                    <a href="/file?name=${file}" target="_blank">${file}</a>
+                    <button onclick="deleteFile('${file}')">Delete</button>
+                </li>
+            `).join('') + '</ul>';
+        }
+
+        async function deleteFile(fileName) {
+            const response = await fetch(`/delete-file?name=${fileName}`, { method: 'DELETE' });
+            const status = document.getElementById('fileManagerStatus');
+            if (response.ok) {
+                status.textContent = `File ${fileName} deleted successfully.`;
+                fetchFileList();
+            } else {
+                status.textContent = `Failed to delete ${fileName}.`;
+            }
+        }
+
+        document.getElementById('uploadFileForm').addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            const fileInput = document.getElementById('newFile');
+            const status = document.getElementById('fileManagerStatus');
+
+            if (!fileInput.files.length) {
+                status.textContent = 'Please select a file to upload.';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                status.textContent = 'Uploading...';
+                const response = await fetch('/upload-file', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    status.textContent = 'File uploaded successfully.';
+                    fetchFileList();
+                } else {
+                    status.textContent = 'File upload failed.';
+                }
+            } catch (error) {
+                status.textContent = 'An error occurred during upload.';
+            }
+        });
+
+        async function fetchFileListForEditor() {
+            const response = await fetch('/list-files');
+            const fileList = await response.json();
+            const fileSelector = document.getElementById('fileSelector');
+
+            if (fileList.length === 0) {
+                fileSelector.innerHTML = '<option value="">No files available</option>';
+                return;
+            }
+
+            fileSelector.innerHTML = '<option value="">Select a file</option>';
+            fileSelector.innerHTML += fileList.map(file => `<option value="${file}">${file}</option>`).join('');
+        }
+
+        document.getElementById('fileSelector').addEventListener('change', async function () {
+            const fileName = this.value;
+            if (fileName === '')
+                return;
+            const response = await fetch(`/file?name=${fileName}`);
+            if (response.ok) {
+                const fileContent = await response.text();
+                document.getElementById('fileEditor').value = fileContent;
+            } else {
+                document.getElementById('editorStatus').textContent = 'Failed to load file content.';
+            }
+        });
+
+        document.getElementById('saveFileButton').addEventListener('click', async function () {
+            const fileName = document.getElementById('fileSelector').value;
+            const fileContent = document.getElementById('fileEditor').value;
+
+            const formData = new FormData();
+            formData.append('name', fileName);
+            formData.append('content', fileContent);
+
+            const response = await fetch('/save-file', {
+                method: 'POST',
+                body: formData
+            });
+
+            const status = document.getElementById('editorStatus');
+            if (response.ok) {
+                status.textContent = 'File saved successfully.';
+            } else {
+                const errorText = await response.text();
+                status.textContent = 'Failed to save file: ' + errorText;
+            }
+        });
+
+        fetchFileList();
+        fetchFileListForEditor();
+    </script>
+</body>
+
+</html>

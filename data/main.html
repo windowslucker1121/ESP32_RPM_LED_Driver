@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>RPM Configuration</title>
+    <link rel="stylesheet" href="/main.css">
+</head>
+
+<body>
+    <div class="topbar">
+        <a href="/main.html">Main</a>
+        <a href="/style-editor.html">Style Editor</a>
+        <a href="/firmware-update.html">System</a>
+    </div>
+    <div class="container">
+        <div class="container">
+            <h1>LED Driver Information</h1>
+
+            <div id="status" class="disconnected">Disconnected</div>
+            <div class="connection-status">
+                <button id="connectBtn">Connect</button>
+                <button id="disconnectBtn" disabled>Disconnect</button>
+            </div>
+            <div class="status-container">
+
+                <div class="hz-display">
+                    <h2>Live Hz Monitor</h2>
+                    <p>Current Hz: <span id="currentHz">--</span></p>
+                    <p>Run Min Hz: <span id="MinHzCurr">--</span></p>
+                    <p>Run Max Hz: <span id="MaxHzCurr">--</span></p>
+                    <button id="resetHzBtn" type="button">Reset Run Min/Max</button>
+                </div>
+                <div class="info">
+                    <h2>Information</h2>
+                    <p>Mapped Value <span id="mappedValue">--</span></p>
+                    <p>0 equals to all Leds OFF</p>
+                    <p>100 equals to all Leds ON</p>
+                </div>
+            </div>
+
+            <form id="configForm">
+                <div class="grid-container">
+
+                    <div class="form-cube">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="ledEnabled">
+                            <label for="ledEnabled">LED Enabled</label>
+                        </div>
+                    </div>
+
+                    <div class="form-cube">
+                        <label for="brightness">Brightness (0-255)</label>
+                        <input type="number" id="brightness" min="0" max="255" required>
+                    </div>
+
+                    <div class="form-cube">
+                        <label for="style">Animation Style:</label>
+                        <select name="style" id="styleDropdown"></select>
+                    </div>
+
+                    <div class="form-cube">
+                        <label for="minHz">Min Hz</label>
+                        <input type="number" id="minHz" min="1" required>
+                    </div>
+
+                    <div class="form-cube">
+                        <label for="maxHz">Max Hz</label>
+                        <input type="number" id="maxHz" min="1" required>
+                    </div>
+
+                    <div class="form-cube">
+                        <label for="style">Bootup Animation(ms):</label>
+                        <input type="number" id="bootupAnimationTime" name="bootupAnimationTime" min="1" required>>
+                    </div>
+                </div>
+                <button type="submit">Save Configuration</button>
+                <div id="response"></div>
+            </form>
+        </div>
+
+        <script>
+            const WS_MSG_DATA_UPDATE = 0x01;
+            const WS_MSG_PING = 0x02;
+            const WS_MSG_PONG = 0x03;
+            const WS_MSG_CONFIG_REQUEST = 0x04;
+            const WS_MSG_CONFIG_RESPONSE = 0x05;
+            const WS_MSG_STYLE_REQUEST = 0x06;
+            const WS_MSG_STYLE_RESPONSE = 0x07;
+            const WS_MSG_TEST_MODE = 0x08;
+            const WS_MSG_CONFIG_UPDATE = 0x10;
+            const WS_MSG_CONFIG_CONFIRM = 0x11;
+
+            let socket = null;
+            let pingInterval = null;
+            let reconnectAttempts = 0;
+            const MAX_RECONNECT_ATTEMPTS = 3;
+
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const statusEl = document.getElementById('status');
+            const configForm = document.getElementById('configForm');
+            const resetHzBtn = document.getElementById('resetHzBtn');
+
+            connectBtn.addEventListener('click', () => {
+                connectWebSocket();
+            });
+
+            disconnectBtn.addEventListener('click', () => {
+                disconnectWebSocket();
+            });
+
+            function connectWebSocket() {
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                let wsUrl = `${protocol}//${location.host}/ws`;
+
+                if (location.host === '') {
+                    console.log('No host detected, using hardcoded ws://10.10.0.225/ws');
+                    wsUrl = 'ws://10.10.0.225/ws'
+                }
+
+                try {
+                    socket = new WebSocket(wsUrl);
+
+                    socket.onopen = () => {
+                        console.log('WebSocket connected');
+                        statusEl.textContent = 'Connected';
+                        statusEl.className = 'connected';
+                        connectBtn.disabled = true;
+                        disconnectBtn.disabled = false;
+
+                        pingInterval = setInterval(sendPing, 2500);
+                        requestConfig();
+                        requestStyles();
+                        reconnectAttempts = 0;
+                    };
+
+                    socket.onclose = (event) => {
+                        console.log('WebSocket closed', event);
+                        handleDisconnection();
+
+                        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                            let message = `Connection lost. Attempting to reconnect ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`;
+                            statusEl.textContent = message;
+                            setTimeout(() => {
+                                reconnectAttempts++;
+                                console.log(message);
+                                connectWebSocket();
+                            }, 3000);
+                        }
+                    };
+
+                    socket.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        handleDisconnection();
+                    };
+
+                    socket.onmessage = handleWebSocketMessage;
+
+                } catch (error) {
+                    console.error('Error creating WebSocket:', error);
+                    handleDisconnection();
+                }
+            }
+
+            function disconnectWebSocket() {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    reconnectAttempts = MAX_RECONNECT_ATTEMPTS;
+                    socket.close();
+                }
+                handleDisconnection();
+            }
+
+            function handleDisconnection() {
+                if (pingInterval) {
+                    clearInterval(pingInterval);
+                    pingInterval = null;
+                }
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+
+                socket = null;
+            }
+
+            function sendPing() {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    const pingMsg = new Uint8Array([WS_MSG_PING]);
+                    socket.send(pingMsg);
+                }
+            }
+
+            function requestConfig() {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    const configReq = new Uint8Array([WS_MSG_CONFIG_REQUEST]);
+                    socket.send(configReq);
+                }
+            }
+
+            function requestStyles() {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    const styleReq = new Uint8Array([WS_MSG_STYLE_REQUEST]);
+                    socket.send(styleReq);
+                }
+            }
+
+            function handleWebSocketMessage(event) {
+                if (event.data instanceof Blob) {
+                    event.data.arrayBuffer().then(buffer => {
+                        const data = new Uint8Array(buffer);
+                        if (data.length === 0) return;
+
+                        const messageType = data[0];
+
+                        switch (messageType) {
+                            case WS_MSG_DATA_UPDATE:
+                                if (data.length >= 4) {
+                                    const hz = data[1] | (data[2] << 8);
+                                    const mappedValue = data[3];
+                                    updateValues(hz, mappedValue);
+                                }
+                                break;
+
+                            case WS_MSG_PONG:
+                                break;
+
+                            case WS_MSG_CONFIG_RESPONSE:
+                                if (data.length >= 9) {
+                                    // Extract min and max Hz
+                                    const minHz = data[1] | (data[2] << 8);
+                                    const maxHz = data[3] | (data[4] << 8);
+                                    const isEnabled = data[5] === 1;
+                                    const brightness = data[6] | (data[7] << 8);
+                                    const animationBootupTime = data[8] | (data[9] << 8);
+                                    updateConfigFields(minHz, maxHz, isEnabled, brightness, animationBootupTime);
+                                }
+                                break;
+
+                            case WS_MSG_STYLE_RESPONSE:
+                                if (data.length >= 2) {
+                                    processStyleData(data);
+                                }
+                                break;
+
+                            case WS_MSG_CONFIG_CONFIRM:
+                                document.getElementById('response').textContent = 'Configuration updated!';
+                                setTimeout(() => {
+                                    document.getElementById('response').textContent = '';
+                                }, 3000);
+                                break;
+                        }
+                    });
+                }
+            }
+
+            function updateValues(hz, mappedValue) {
+                document.getElementById('currentHz').textContent = hz;
+                document.getElementById('mappedValue').textContent = mappedValue;
+
+                let MinHzCurr = parseFloat(document.getElementById('MinHzCurr').textContent);
+                if (isNaN(MinHzCurr) || hz < MinHzCurr) {
+                    document.getElementById('MinHzCurr').textContent = hz;
+                }
+
+                let MaxHzCurr = parseFloat(document.getElementById('MaxHzCurr').textContent);
+                if (isNaN(MaxHzCurr) || hz > MaxHzCurr) {
+                    document.getElementById('MaxHzCurr').textContent = hz;
+                }
+            }
+
+            function updateConfigFields(minHz, maxHz, isEnabled, brightness, bootupAnimationTime) {
+                document.getElementById('minHz').value = minHz;
+                document.getElementById('maxHz').value = maxHz;
+                document.getElementById('ledEnabled').checked = isEnabled;
+                document.getElementById('brightness').value = brightness;
+                document.getElementById('bootupAnimationTime').value = bootupAnimationTime;
+            }
+
+            function processStyleData(data) {
+
+                let pos = 1;
+                const styleCount = data[pos++];
+
+                const currentStyleLength = data[pos++];
+                const currentStyleBytes = data.slice(pos, pos + currentStyleLength);
+                pos += currentStyleLength;
+                const currentStyle = new TextDecoder().decode(currentStyleBytes);
+
+                const dropdown = document.getElementById("styleDropdown");
+                dropdown.innerHTML = '';
+
+                for (let i = 0; i < styleCount; i++) {
+                    const styleLength = data[pos++];
+                    const styleBytes = data.slice(pos, pos + styleLength);
+                    pos += styleLength;
+
+                    const style = new TextDecoder().decode(styleBytes);
+                    const option = document.createElement("option");
+                    option.value = style;
+                    option.textContent = style;
+                    dropdown.appendChild(option);
+
+                    if (style === currentStyle) {
+                        option.selected = true;
+                    }
+                }
+            }
+
+            configForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    const minHz = parseInt(document.getElementById('minHz').value);
+                    const maxHz = parseInt(document.getElementById('maxHz').value);
+                    const style = document.getElementById('styleDropdown').value;
+                    const isEnabled = document.getElementById('ledEnabled').checked ? 1 : 0;
+                    const brightness = parseInt(document.getElementById('brightness').value);
+                    const bootupAnimationTime = parseInt(document.getElementById('bootupAnimationTime').value);
+
+                    if (confirm('Are you sure you want to save this configuration? (Please powercycle the device if you encounter any issues.)')) {
+                        const encoder = new TextEncoder();
+                        const styleBytes = encoder.encode(style);
+                        const message = new Uint8Array(10 + styleBytes.length);
+
+                        message[0] = WS_MSG_CONFIG_UPDATE;
+                        message[1] = minHz & 0xFF;
+                        message[2] = (minHz >> 8) & 0xFF;
+                        message[3] = maxHz & 0xFF;
+                        message[4] = (maxHz >> 8) & 0xFF;
+                        message[5] = isEnabled;
+                        message[6] = brightness & 0xFF;
+                        message[7] = (brightness >> 8) & 0xFF;
+                        message[8] = bootupAnimationTime & 0xFF;
+                        message[9] = (bootupAnimationTime >> 8) & 0xFF;
+
+                        message.set(styleBytes, 10);
+
+                        socket.send(message);
+                        document.getElementById('response').textContent = 'Sending configuration...';
+                    }
+                } else {
+                    document.getElementById('response').textContent = 'Not connected! Please connect first.';
+                    setTimeout(() => {
+                        document.getElementById('response').textContent = '';
+                    }, 3000);
+                }
+            });
+
+            resetHzBtn.addEventListener('click', function () {
+                document.getElementById('MinHzCurr').textContent = '--';
+                document.getElementById('MaxHzCurr').textContent = '--';
+            });
+            window.addEventListener('load', connectWebSocket);
+        </script>
+</body>
+
+</html>
