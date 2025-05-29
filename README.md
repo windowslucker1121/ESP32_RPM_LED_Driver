@@ -37,6 +37,12 @@ You may could add another Sensor, by implementing [ISensor](https://github.com/w
 ## Demo
 ![](https://github.com/windowslucker1121/ESP32_RPM_LED_Driver/blob/main/pictures/Animation.gif?raw=true)
 
+## Schema and Layout
+This may contain mistakes, because its the first Schema i have drawn, so any contributions are very welcome.
+
+![](https://github.com/windowslucker1121/ESP32_RPM_LED_Driver/blob/main/pictures/Breadboard_Layout.png?raw=true)
+
+![](https://github.com/windowslucker1121/ESP32_RPM_LED_Driver/blob/main/pictures/Electrical_Schema.png?raw=true)
 ## TODO
  -  electrical schema
  - used parts
